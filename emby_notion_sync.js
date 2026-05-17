@@ -1,47 +1,44 @@
 /**
  * Emby -> Notion 全自动联动脚本
- * @version v3.2 (终极避坑版)
- * @description 彻底移除双引号，改用 | 竖杠作为分隔符，完美避开 Loon 的逗号解析陷阱！
+ * @version v3.3 (大满贯终极版)
+ * @description 拥抱 Loon 官方数组传参格式，彻底解决变量不替换的底层 Bug！
  */
 
-function getLoonArgs() {
-    const args = {};
-    if (typeof $argument !== "undefined" && typeof $argument === "string") {
-        $argument.split("&").forEach(pair => {
-            let parts = pair.split("=");
-            if (parts.length >= 2) {
-                let key = parts[0].trim();
-                let rawValue = parts.slice(1).join("=").trim();
-                try {
-                    args[key] = decodeURIComponent(rawValue);
-                } catch (e) {
-                    args[key] = rawValue;
-                }
-            }
-        });
+// ================= [1. 解析 Loon 原生数组参数] =================
+let NOTION_TOKEN = null;
+let DATABASE_ID = null;
+let argCoolDownHour = 6;
+let argServerMap = null;
+
+if (typeof $argument !== "undefined" && typeof $argument === "string") {
+    let argStr = $argument;
+    // Loon 的官方数组格式会被注入为: [Token, ID, Hour, ServerMap]
+    if (argStr.startsWith('[') && argStr.endsWith(']')) {
+        argStr = argStr.slice(1, -1);
     }
-    return args;
+    let argsArray = argStr.split(',');
+    if (argsArray.length >= 4) {
+        NOTION_TOKEN = argsArray[0].trim();
+        DATABASE_ID = argsArray[1].trim();
+        argCoolDownHour = parseFloat(argsArray[2].trim());
+        // 提取域名列表
+        argServerMap = argsArray.slice(3).join(',').trim(); 
+    }
 }
 
-const parsedArgs = getLoonArgs();
-
-const NOTION_TOKEN = parsedArgs.NotionToken ? parsedArgs.NotionToken.trim() : null;
-const DATABASE_ID = parsedArgs.DatabaseID ? parsedArgs.DatabaseID.trim() : null;
-const argCoolDownHour = parsedArgs.CoolDownHour ? parseFloat(parsedArgs.CoolDownHour) : 6;
-const COOL_DOWN_MS = argCoolDownHour * 60 * 60 * 1000; 
-let argServerMap = parsedArgs.ServerMap ? parsedArgs.ServerMap.replace(/["'{}]/g, '') : null;
-
+const COOL_DOWN_MS = (isNaN(argCoolDownHour) ? 6 : argCoolDownHour) * 60 * 60 * 1000; 
 const COL_NAME = "emby名称"; 
 const COL_TIME = "最近播放时间"; 
 
 if (!NOTION_TOKEN || !DATABASE_ID || !argServerMap) {
-    console.log(`❌ 致命错误：未能读取到核心参数。当前拿到的是: Token=${NOTION_TOKEN}, ID=${DATABASE_ID}, 列表=${argServerMap}`);
+    console.log(`❌ 致命错误：未能读取到核心参数！Loon 传过来的原值为: ${$argument}`);
     $done({});
 }
 
+// ================= [2. 解析动态映射字典] =================
 const SERVER_MAP = {};
-// 【核心修复】改为按 竖杠 | 或 分号 ; 分割，彻底抛弃逗号！
-argServerMap.split(/[\n\|;；]+/).forEach(item => {
+// 清理各种奇怪的符号，并支持使用竖线 | 隔开
+argServerMap.replace(/["'{}]/g, '').split(/[\n\|;；]+/).forEach(item => {
     let parts = item.split(':');
     if (parts.length >= 2) {
         let embyHost = parts[0].trim();
@@ -53,10 +50,11 @@ argServerMap.split(/[\n\|;；]+/).forEach(item => {
 });
 
 if (Object.keys(SERVER_MAP).length === 0) {
-    console.log(`❌ 致命错误：解析为空！Loon 传过来的原文字符串是: ${argServerMap}`);
+    console.log(`❌ 解析为空！Loon 传过来的原文字符串是: ${$argument}`);
     $done({});
 }
 
+// ================= [3. 流量拦截与防爆破主逻辑] =================
 const url = $request.url;
 
 const hostMatch = url.match(/^https?:\/\/([^/:]+)/);
@@ -77,14 +75,16 @@ if (!embyName) {
 const lastRunTime = $persistentStore.read(lastRunKey);
 const now = Date.now();
 
+// 冷却时长如果等于 0，则畅通无阻，临时取消冷却成功！
 if (COOL_DOWN_MS > 0 && lastRunTime && (now - parseInt(lastRunTime)) < COOL_DOWN_MS) {
     console.log(`⏳ [${embyName}] 距离上次打卡不足 ${argCoolDownHour} 小时，触发省电冷却，跳过网络请求。`);
     $done({});
 }
 
-console.log(`🚀 [v3.2] 检测到 [${embyName}] 真实播放，准备同步至 Notion...`);
+console.log(`🚀 [v3.3] 检测到 [${embyName}] 真实播放，准备同步至 Notion...`);
 syncToNotion(embyName);
 
+// ================= [4. 业务执行：Notion 查改一体] =================
 async function syncToNotion(name) {
     try {
         const pageId = await queryNotionPage(name);
@@ -150,7 +150,7 @@ function createNotionPage(name) {
             body: JSON.stringify(postBody)
         };
         $httpClient.post(options, (error, response, data) => {
-            if (error) reject(`新建行异常。`);
+            if (error) reject(`新建行网络异常。`);
             else {
                 if (response.status === 200) {
                     console.log(`✅ [${name}] 自动新建记录成功！`);
@@ -180,7 +180,7 @@ function updateNotionTime(pageId, name) {
             body: JSON.stringify(patchBody)
         };
         $httpClient.patch(options, (error, response, data) => {
-            if (error) reject(`更新时间异常。`);
+            if (error) reject(`更新时间网络异常。`);
             else {
                 if (response.status === 200) {
                     console.log(`✅ [${name}] 历史记录更新成功！`);
