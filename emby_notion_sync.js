@@ -1,44 +1,32 @@
 /**
  * Emby -> Notion 全自动联动脚本
- * @version v3.3 (大满贯终极版)
- * @description 拥抱 Loon 官方数组传参格式，彻底解决变量不替换的底层 Bug！
+ * @version v3.4 (突破 Loon 底层限制终极版)
+ * @description 采用无括号、无引号、无空格的 $$$ 终极裸奔传参法，彻底击穿 Loon 的底层 Bug！
  */
 
-// ================= [1. 解析 Loon 原生数组参数] =================
-let NOTION_TOKEN = null;
-let DATABASE_ID = null;
-let argCoolDownHour = 6;
-let argServerMap = null;
+let argStr = typeof $argument !== "undefined" ? $argument : "";
 
-if (typeof $argument !== "undefined" && typeof $argument === "string") {
-    let argStr = $argument;
-    // Loon 的官方数组格式会被注入为: [Token, ID, Hour, ServerMap]
-    if (argStr.startsWith('[') && argStr.endsWith(']')) {
-        argStr = argStr.slice(1, -1);
-    }
-    let argsArray = argStr.split(',');
-    if (argsArray.length >= 4) {
-        NOTION_TOKEN = argsArray[0].trim();
-        DATABASE_ID = argsArray[1].trim();
-        argCoolDownHour = parseFloat(argsArray[2].trim());
-        // 提取域名列表
-        argServerMap = argsArray.slice(3).join(',').trim(); 
-    }
+// 使用超级分隔符切割
+let argsArray = argStr.split("$$$");
+
+if (argsArray.length < 4 || argStr.includes("{NotionToken}")) {
+    console.log(`❌ 致命错误：参数被 Loon 截断或未替换！\n⚠️ 请确保你在 Loon 插件的【公益服列表】里没有敲哪怕一个【空格】或【逗号】！\n🔍 当前接收到的残缺/原生参数: ${argStr}`);
+    $done({});
 }
+
+const NOTION_TOKEN = argsArray[0].trim();
+const DATABASE_ID = argsArray[1].trim();
+const argCoolDownHour = parseFloat(argsArray[2].trim());
+const argServerMap = argsArray[3].trim();
 
 const COOL_DOWN_MS = (isNaN(argCoolDownHour) ? 6 : argCoolDownHour) * 60 * 60 * 1000; 
 const COL_NAME = "emby名称"; 
 const COL_TIME = "最近播放时间"; 
 
-if (!NOTION_TOKEN || !DATABASE_ID || !argServerMap) {
-    console.log(`❌ 致命错误：未能读取到核心参数！Loon 传过来的原值为: ${$argument}`);
-    $done({});
-}
-
-// ================= [2. 解析动态映射字典] =================
+// ================= [解析动态映射字典] =================
 const SERVER_MAP = {};
-// 清理各种奇怪的符号，并支持使用竖线 | 隔开
-argServerMap.replace(/["'{}]/g, '').split(/[\n\|;；]+/).forEach(item => {
+// 按竖线切割，此时里面绝对不能有逗号
+argServerMap.replace(/["'{}]/g, '').split('|').forEach(item => {
     let parts = item.split(':');
     if (parts.length >= 2) {
         let embyHost = parts[0].trim();
@@ -50,11 +38,11 @@ argServerMap.replace(/["'{}]/g, '').split(/[\n\|;；]+/).forEach(item => {
 });
 
 if (Object.keys(SERVER_MAP).length === 0) {
-    console.log(`❌ 解析为空！Loon 传过来的原文字符串是: ${$argument}`);
+    console.log(`❌ 字典解析为空！请检查服务器列表格式是否严格为 域名:名字|域名:名字`);
     $done({});
 }
 
-// ================= [3. 流量拦截与防爆破主逻辑] =================
+// ================= [流量拦截与防爆破主逻辑] =================
 const url = $request.url;
 
 const hostMatch = url.match(/^https?:\/\/([^/:]+)/);
@@ -75,16 +63,15 @@ if (!embyName) {
 const lastRunTime = $persistentStore.read(lastRunKey);
 const now = Date.now();
 
-// 冷却时长如果等于 0，则畅通无阻，临时取消冷却成功！
 if (COOL_DOWN_MS > 0 && lastRunTime && (now - parseInt(lastRunTime)) < COOL_DOWN_MS) {
     console.log(`⏳ [${embyName}] 距离上次打卡不足 ${argCoolDownHour} 小时，触发省电冷却，跳过网络请求。`);
     $done({});
 }
 
-console.log(`🚀 [v3.3] 检测到 [${embyName}] 真实播放，准备同步至 Notion...`);
+console.log(`🚀 [v3.4] 检测到 [${embyName}] 真实播放，准备同步至 Notion...`);
 syncToNotion(embyName);
 
-// ================= [4. 业务执行：Notion 查改一体] =================
+// ================= [业务执行：Notion 查改一体] =================
 async function syncToNotion(name) {
     try {
         const pageId = await queryNotionPage(name);
