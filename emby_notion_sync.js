@@ -1,32 +1,39 @@
 /**
  * Emby -> Notion 全自动联动脚本
- * @version v3.4 (突破 Loon 底层限制终极版)
- * @description 采用无括号、无引号、无空格的 $$$ 终极裸奔传参法，彻底击穿 Loon 的底层 Bug！
+ * @version v3.5 (终极破釜沉舟版)
+ * @description 彻底规避 Loon 的大小写变量 Bug 与标点符号截断陷阱，采用全小写 + === 强力连接！
  */
 
 let argStr = typeof $argument !== "undefined" ? $argument : "";
 
-// 使用超级分隔符切割
-let argsArray = argStr.split("$$$");
+// 尝试去除外层可能包裹的双引号防错
+if (argStr.startsWith('"') && argStr.endsWith('"')) {
+    argStr = argStr.slice(1, -1);
+}
 
-if (argsArray.length < 4 || argStr.includes("{NotionToken}")) {
-    console.log(`❌ 致命错误：参数被 Loon 截断或未替换！\n⚠️ 请确保你在 Loon 插件的【公益服列表】里没有敲哪怕一个【空格】或【逗号】！\n🔍 当前接收到的残缺/原生参数: ${argStr}`);
+// 使用超级分隔符 === 切割（前面3个是基础配置，后面所有的全都是服务器列表）
+let argsArray = argStr.split("===");
+
+if (argsArray.length < 4 || argStr.includes("{token}")) {
+    console.log(`❌ 致命错误：参数仍未被替换！\n接收到的残缺参数: ${argStr}\n⚠️ 终极解法：请在 Loon 中【删除该插件】，然后【重新添加】，以彻底清空 UI 缓存！`);
     $done({});
 }
 
+// 提取核心配置
 const NOTION_TOKEN = argsArray[0].trim();
 const DATABASE_ID = argsArray[1].trim();
 const argCoolDownHour = parseFloat(argsArray[2].trim());
-const argServerMap = argsArray[3].trim();
-
 const COOL_DOWN_MS = (isNaN(argCoolDownHour) ? 6 : argCoolDownHour) * 60 * 60 * 1000; 
+
 const COL_NAME = "emby名称"; 
 const COL_TIME = "最近播放时间"; 
 
 // ================= [解析动态映射字典] =================
 const SERVER_MAP = {};
-// 按竖线切割，此时里面绝对不能有逗号
-argServerMap.replace(/["'{}]/g, '').split('|').forEach(item => {
+// argsArray 从第 4 项开始，全都是服务器映射配置
+const serverParts = argsArray.slice(3);
+
+serverParts.forEach(item => {
     let parts = item.split(':');
     if (parts.length >= 2) {
         let embyHost = parts[0].trim();
@@ -38,7 +45,7 @@ argServerMap.replace(/["'{}]/g, '').split('|').forEach(item => {
 });
 
 if (Object.keys(SERVER_MAP).length === 0) {
-    console.log(`❌ 字典解析为空！请检查服务器列表格式是否严格为 域名:名字|域名:名字`);
+    console.log(`❌ 字典解析为空！请检查 Loon 插件 UI 中的服务器列表格式。`);
     $done({});
 }
 
@@ -68,7 +75,7 @@ if (COOL_DOWN_MS > 0 && lastRunTime && (now - parseInt(lastRunTime)) < COOL_DOWN
     $done({});
 }
 
-console.log(`🚀 [v3.4] 检测到 [${embyName}] 真实播放，准备同步至 Notion...`);
+console.log(`🚀 [v3.5] 检测到 [${embyName}] 真实播放，准备同步至 Notion...`);
 syncToNotion(embyName);
 
 // ================= [业务执行：Notion 查改一体] =================
